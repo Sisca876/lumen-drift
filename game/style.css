@@ -1,0 +1,33 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: radial-gradient(1200px 700px at 50% 18%, #1c2a66 0%, #0b1035 55%, #05081f 100%);
+}
+#stage {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  box-sizing: border-box;
+}
+#game {
+  display: block;
+  width: min(1280px, 100%);
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(103, 232, 249, 0.25), 0 18px 60px rgba(0, 0, 0, 0.65), 0 0 90px rgba(45, 212, 191, 0.12);
+  cursor: crosshair;
+  touch-action: none;
+  background: #0b1035;
+}
+#status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
