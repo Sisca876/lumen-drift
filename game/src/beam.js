@@ -31,13 +31,15 @@ export function distToSegment(px, py, x1, y1, x2, y2) {
 }
 
 export class PrismBuoy {
-  constructor(x, y) {
+  constructor(x, y, prism = false) {
     this.x = x;
     this.y = y;
     this.radius = 26;
     this.phase = Math.random() * Math.PI * 2;
     this.flash = 0; // lights up when the beam kisses it
     this.spin = 0;
+    this.prism = prism; // an objective prism: dark until the beam lights it
+    this.lit = false; // objective prisms start dark each night
   }
 
   update(dt) {
@@ -49,7 +51,7 @@ export class PrismBuoy {
 }
 
 export function createBuoys(reefIndex) {
-  return BUOY_LAYOUTS[reefIndex % BUOY_LAYOUTS.length].map((p) => new PrismBuoy(p.x, p.y));
+  return BUOY_LAYOUTS[reefIndex % BUOY_LAYOUTS.length].map((p, i) => new PrismBuoy(p.x, p.y, i < 4));
 }
 
 // Trace the beam. Returns { points, bounces, hitBuoys } where points[0] is the
@@ -231,37 +233,50 @@ export function drawStar(ctx, x, y, r, points = 4, inner = 0.45) {
   ctx.restore();
 }
 
-// The buoys themselves: floating crystal prisms on a ripple ring.
+// The buoys themselves: floating crystal prisms on a ripple ring. An unlit
+// objective prism is dark slate with a dashed beckoning ring; the beam
+// wakes it into full glow.
 export function drawBuoy(ctx, buoy, t) {
   const y = buoy.bobY(t);
+  const dark = buoy.prism && !buoy.lit;
   const pulse = 1 + buoy.flash * 0.5 + Math.sin(t * 2 + buoy.phase) * 0.06;
   ctx.save();
   ctx.translate(buoy.x, y);
   // Ripple ring on the water.
-  ctx.globalAlpha = 0.5;
-  ctx.strokeStyle = '#67e8f9';
+  ctx.globalAlpha = dark ? 0.35 : 0.5;
+  ctx.strokeStyle = dark ? '#94a3b8' : '#67e8f9';
   ctx.lineWidth = 2;
+  if (dark) ctx.setLineDash([6, 6]);
   ctx.beginPath();
   ctx.ellipse(0, 30, 34, 9, 0, 0, Math.PI * 2);
   ctx.stroke();
-  // Glow.
-  ctx.globalCompositeOperation = 'lighter';
-  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 52 * pulse);
-  g.addColorStop(0, `rgba(165, 243, 252, ${0.5 + buoy.flash * 0.4})`);
-  g.addColorStop(1, 'rgba(165, 243, 252, 0)');
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.arc(0, 0, 52 * pulse, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalCompositeOperation = 'source-over';
+  ctx.setLineDash([]);
+  if (!dark) {
+    // Glow.
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, 52 * pulse);
+    g.addColorStop(0, `rgba(165, 243, 252, ${0.5 + buoy.flash * 0.4})`);
+    g.addColorStop(1, 'rgba(165, 243, 252, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, 52 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
   // Crystal: rotating diamond with facets.
   ctx.rotate(Math.sin(buoy.spin) * 0.16);
   ctx.scale(pulse, pulse);
-  ctx.globalAlpha = 1;
+  ctx.globalAlpha = dark ? 0.75 : 1;
   const grad = ctx.createLinearGradient(0, -26, 0, 26);
-  grad.addColorStop(0, '#ecfeff');
-  grad.addColorStop(0.45, '#67e8f9');
-  grad.addColorStop(1, '#0e7490');
+  if (dark) {
+    grad.addColorStop(0, '#475569');
+    grad.addColorStop(0.45, '#334155');
+    grad.addColorStop(1, '#1e293b');
+  } else {
+    grad.addColorStop(0, '#ecfeff');
+    grad.addColorStop(0.45, '#67e8f9');
+    grad.addColorStop(1, '#0e7490');
+  }
   ctx.fillStyle = grad;
   ctx.beginPath();
   ctx.moveTo(0, -26);
@@ -270,17 +285,17 @@ export function drawBuoy(ctx, buoy, t) {
   ctx.lineTo(-15, 0);
   ctx.closePath();
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.strokeStyle = dark ? 'rgba(148, 163, 184, 0.7)' : 'rgba(255,255,255,0.9)';
   ctx.lineWidth = 1.6;
   ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.strokeStyle = dark ? 'rgba(148, 163, 184, 0.35)' : 'rgba(255,255,255,0.55)';
   ctx.beginPath();
   ctx.moveTo(0, -26);
   ctx.lineTo(0, 26);
   ctx.moveTo(-15, 0);
   ctx.lineTo(15, 0);
   ctx.stroke();
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = dark ? '#64748b' : '#ffffff';
   ctx.beginPath();
   ctx.arc(0, 0, 3.4, 0, Math.PI * 2);
   ctx.fill();

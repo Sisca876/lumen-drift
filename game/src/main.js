@@ -2,17 +2,17 @@
 // relic choice, victory, game over), the loop, beam combat, scoring, combo,
 // screen shake and the screenshot hooks the maker uses to capture the game.
 
-import { WORLD, PLAYER_TUNING, BEAM_TUNING, COMBO_TUNING, REEFS, reefForNight, ENEMY_DEFS, BOSS_DEF } from './config.js';
+import { WORLD, PLAYER_TUNING, BEAM_TUNING, COMBO_TUNING, REEFS, reefForNight, ENEMY_DEFS, BOSS_DEF, SPIRE, REEF_LIGHT_MAX, REEF_LIGHT_NIGHT_BONUS, REEF_LIGHT_LANTERN_BONUS, REEF_LIGHT_ORB_DRAIN, NIGHT_DURATIONS, ENDLESS_NIGHT_DURATION, LANTERN_LAYOUTS } from './config.js';
 import { SoundEngine } from './audio.js';
 import { Input } from './input.js';
 import { Particles } from './particles.js';
 import { Background } from './background.js';
-import { traceBeam, drawBeam, drawBuoy, createBuoys, distToSegment, findBestBeamDir } from './beam.js';
-import { Player, Enemy, Boss, Shard, EnemyBullet } from './entities.js';
+import { traceBeam, drawBeam, drawBuoy, createBuoys, distToSegment, findBestBeamDir, PrismBuoy } from './beam.js';
+import { Player, Enemy, Boss, Shard, EnemyBullet, WildLantern, drawSpire } from './entities.js';
 import { NightDirector } from './waves.js';
 import { rollRelics, RELIC_POOL } from './relics.js';
 import {
-  drawTopBar, drawIncomingPanel, drawRelicsPanel, drawHints, drawComboGauge,
+  drawTopBar, drawIncomingPanel, drawRelicsPanel, drawReefMap, drawMinimap, drawHints, drawComboGauge,
   drawDashPip, drawBanner, drawTitleScreen, drawRelicChoice, drawVictory,
   drawGameOver, drawPause, titleLayout, relicLayout, victoryLayout,
   gameOverLayout, soundChipRect, pointIn,
@@ -35,11 +35,21 @@ export class Game {
     this.t = 0;
     this.night = 1;
     this.endless = false;
+    this.clearedReefs = new Set();
     this.enemies = [];
     this.bullets = [];
     this.shards = [];
     this.boss = null;
     this.buoys = createBuoys(0);
+    this.spire = { x: SPIRE.x, y: SPIRE.y, radius: SPIRE.radius, flash: 0 };
+    this.reefLight = REEF_LIGHT_MAX;
+    this.reefLightMax = REEF_LIGHT_MAX;
+    this.lanterns = [];
+    this.lanternsLit = 0;
+    this.dawnLeft = Infinity;
+    this.dawnRushing = false;
+    this.dawnAnnounced = false;
+    this.gameOverReason = null;
     this.relics = [];
     this.relicChoices = [];
     this.emberGuard = false;
@@ -59,12 +69,17 @@ export class Game {
     this.bossDeathT = 0;
     this.fireworkTimer = 0;
     this.tipTimer = 0;
+    this.tipEvalTimer = 0;
     this.tip = 'bend the beam through prisms — reflected light hits harder';
     this.beamTrace = null;
     this.beamOn = false;
     this.shotAim = null; // screenshot mode: fixed aim point
     this.shotMode = null; // 'combat' | 'boss': re-aims the beam at live targets
     this.shotReaim = 0;
+    // Title-screen demo buoys live in the left third, so the demo beam never
+    // crosses the title text or the SET SAIL button.
+    this.titleBuoys = [new PrismBuoy(150, 430), new PrismBuoy(330, 300), new PrismBuoy(190, 190)];
+    this.titleAimBuoy = 0;
     this.titleJellies = [];
     for (let i = 0; i < 6; i++) {
       this.titleJellies.push(new Enemy('jelly', 120 + Math.random() * 1040, 150 + Math.random() * 380));
@@ -112,6 +127,10 @@ export class Game {
     this.bossDeathT = 0;
     this.state = 'playing';
     this.paused = false;
+    this.reefLight = REEF_LIGHT_MAX;
+    this.lanternsLit = 0;
+    this.gameOverReason = null;
+    this.clearedReefs = new Set();
     this.startNight(1);
   }
 
@@ -120,8 +139,15 @@ export class Game {
     const reef = reefForNight(Math.min(n, 8));
     this.background.setReef(reef);
     this.buoys = createBuoys(reef);
+    this.lanterns = LANTERN_LAYOUTS[reef].map((p) => new WildLantern(p.x, p.y));
+    this.spire.flash = 0;
     if (this.emberGuard) this.player.shield = true;
     this.director.startNight(n, this);
+    // Dawn clock: boss nights have no dawn — the moon itself is the clock.
+    this.dawnLeft = this.director.isBossNight ? Infinity
+      : (n <= 8 ? NIGHT_DURATIONS[n - 1] : ENDLESS_NIGHT_DURATION);
+    this.dawnRushing = false;
+    this.dawnAnnounced = false;
     const reefName = REEFS[reef].name;
     if (this.director.isBossNight) {
       this.showBanner('THE HOLLOW MOON WAKES', `${reefName} · night ${n} — bend every beam you have`, '#f0abfc');
@@ -131,11 +157,35 @@ export class Game {
     }
   }
 
+  // A night clears when the field is clear AND (on non-boss nights) dawn has
+  // broken and every dark prism is lit.
+  nightClearReady() {
+    if (this.director.isBossNight) return true;
+    if (this.dawnLeft > 0) return false;
+    return this.buoys.filter((b) => b.prism).every((b) => b.lit);
+  }
+
+  drainSpire(amount, x, y) {
+    if (this.state !== 'playing') return;
+    this.reefLight = Math.max(0, this.reefLight - amount);
+    this.spire.flash = 1;
+    this.shake = Math.max(this.shake, 7);
+    this.particles.burst(this.spire.x, this.spire.y - 40, {
+      colors: ['#f87171', '#fcd34d', '#fef3c7'], count: 18, speed: 200, life: 0.6,
+    });
+    this.particles.text(this.spire.x, this.spire.y - 96, `-${amount} REEF LIGHT`, '#f87171', 15);
+    this.sound.playerHit();
+    if (this.reefLight <= 0) this.beginGameOver('spire');
+  }
+
   onNightCleared() {
     this.sound.waveClear();
     this.beamOn = false;
     this.beamTrace = null;
     this.sound.setBeamHum(false);
+    // Dawn restores the spire, and the reef just sailed is marked clear.
+    this.reefLight = Math.min(this.reefLightMax, this.reefLight + REEF_LIGHT_NIGHT_BONUS);
+    this.clearedReefs.add(reefForNight(Math.min(this.night, 8)));
     if (this.night >= 8 && !this.endless) {
       this.beginVictory();
       return;
@@ -175,7 +225,8 @@ export class Game {
     this.startNight(9);
   }
 
-  beginGameOver() {
+  beginGameOver(reason = 'hull') {
+    this.gameOverReason = reason;
     this.state = 'gameover';
     this.beamOn = false;
     this.beamTrace = null;
@@ -254,6 +305,42 @@ export class Game {
     }
   }
 
+  // The advice line, in priority order: danger first, then the objective,
+  // then the craft, then a slow rotation of general tips.
+  contextTip() {
+    const p = this.player;
+    if (this.boss && !this.boss.dead) return 'sink the Hollow Moon — bend every beam you have';
+    for (const e of this.enemies) {
+      if (!e.dead && Math.hypot(e.x - this.spire.x, e.y - this.spire.y) < 170) {
+        return 'an enemy nears the spire — cut it off!';
+      }
+    }
+    if (this.reefLight < 30) return 'the spire is fading — light wild lanterns to feed it!';
+    if (!this.director.isBossNight && this.dawnLeft <= 0) {
+      const unlit = this.buoys.filter((b) => b.prism && !b.lit).length;
+      if (unlit > 0) return 'dawn is here — light the dark prisms to open the way!';
+    }
+    if (!this.director.isBossNight && this.buoys.some((b) => b.prism && !b.lit)) {
+      const lit = this.buoys.filter((b) => b.prism && b.lit).length;
+      if (lit === 0) return 'bend the beam through dark prisms to light them';
+    }
+    if (p.beamSputtered) return 'the lantern sputters — ease off and let it breathe';
+    if (this.chain >= 3) return 'reflected light feeds the chain — keep bending!';
+    if (this.tipTimer > 7) {
+      this.tipTimer = 0;
+      const tips = [
+        'bend the beam through prisms — reflected light hits harder',
+        'the beam burns void orbs out of the sky',
+        'dash through danger — you cannot be hurt mid-dash',
+        'starlight raises your combo — spend it before it fades',
+        'prism buoys drift with the tide — use the angles',
+        'wild lanterns feed the spire when the beam lights them',
+      ];
+      return tips[(Math.random() * tips.length) | 0];
+    }
+    return this.tip;
+  }
+
   damagePlayer() {
     const p = this.player;
     if (p.invuln > 0 || this.state !== 'playing') return;
@@ -286,13 +373,48 @@ export class Game {
     const trace = traceBeam(origin, dir, this.buoys, maxBounces, this.t);
     this.beamTrace = trace;
 
-    // Prism kisses: light the buoys and sing.
+    // Prism kisses: light the buoys and sing. A dark objective prism wakes
+    // permanently when the beam kisses it; lighting them all opens the way.
     let newKisses = 0;
+    let prismLitNow = false;
     for (const b of trace.hitBuoys) {
       if (b.flash <= 0.1) newKisses++;
       b.flash = 1;
+      if (b.prism && !b.lit) {
+        b.lit = true;
+        prismLitNow = true;
+        this.score += 40 * this.multiplier;
+        this.particles.text(b.x, b.y - 30, 'PRISM LIT', '#fcd34d', 16);
+        this.particles.burst(b.x, b.y, { colors: ['#fcd34d', '#fef3c7', '#67e8f9'], count: 22, speed: 220, life: 0.6 });
+      }
     }
     if (newKisses > 0) this.sound.prismPing(trace.bounces);
+    if (prismLitNow) {
+      const prisms = this.buoys.filter((b) => b.prism);
+      if (prisms.length > 0 && prisms.every((b) => b.lit)) {
+        this.showBanner('THE WAY IS OPEN', 'every prism burns — hold the sea until dawn', '#fcd34d');
+        this.sound.relic();
+      }
+    }
+
+    // Wild lanterns catch the beam and light: they feed the spire.
+    for (const l of this.lanterns) {
+      if (l.lit) continue;
+      for (let s = 0; s < trace.points.length - 1; s++) {
+        if (distToSegment(l.x, l.y, trace.points[s].x, trace.points[s].y, trace.points[s + 1].x, trace.points[s + 1].y) < l.radius) {
+          l.lit = true;
+          l.flash = 1;
+          this.lanternsLit++;
+          this.reefLight = Math.min(this.reefLightMax, this.reefLight + REEF_LIGHT_LANTERN_BONUS);
+          this.starlight += 2;
+          this.score += 25 * this.multiplier;
+          this.particles.text(l.x, l.y - 30, 'LANTERN LIT', '#fcd34d', 16);
+          this.particles.burst(l.x, l.y, { colors: ['#fcd34d', '#fef3c7', '#f59e0b'], count: 20, speed: 200, life: 0.7 });
+          this.sound.shard();
+          break;
+        }
+      }
+    }
 
     const width = BEAM_TUNING.baseWidth * p.upgrades.width;
     const dps = BEAM_TUNING.baseDps * p.upgrades.damage;
@@ -389,6 +511,34 @@ export class Game {
 
     p.update(dt, input, this.t);
     for (const b of this.buoys) b.update(dt);
+    for (const l of this.lanterns) l.update(dt);
+    this.spire.flash = Math.max(0, this.spire.flash - dt * 2);
+    // The skiff cannot sail through the spire's stone.
+    {
+      const dx = p.x - this.spire.x;
+      const dy = p.y - this.spire.y;
+      const d = Math.hypot(dx, dy);
+      const min = SPIRE.collide + p.radius;
+      if (d > 0 && d < min) {
+        p.x = this.spire.x + (dx / d) * min;
+        p.y = this.spire.y + (dy / d) * min;
+      }
+    }
+
+    // Dawn clock: the night ends when dawn breaks, the field is clear and
+    // the prisms burn. Dawn hurries once the sea is clear and lit.
+    if (!this.director.isBossNight && this.dawnLeft > 0) {
+      const fieldClear = this.director.queue.length === 0 && this.enemies.length === 0 && (!this.boss || this.boss.dead);
+      const prismsDone = this.buoys.filter((b) => b.prism).every((b) => b.lit);
+      this.dawnRushing = fieldClear && prismsDone;
+      this.dawnLeft = Math.max(0, this.dawnLeft - dt * (this.dawnRushing ? 4 : 1));
+      if (this.dawnLeft === 0 && !this.dawnAnnounced) {
+        this.dawnAnnounced = true;
+        if (!fieldClear) this.showBanner('DAWN BREAKS', 'clear the rest of the tide', '#fcd34d');
+        else if (!prismsDone) this.showBanner('DAWN BREAKS', 'light the dark prisms to open the way', '#fcd34d');
+        else this.showBanner('DAWN BREAKS', 'the night is yours', '#4ade80');
+      }
+    }
 
     // Screenshot mode: keep the beam bent toward whatever is alive right now.
     if (this.shotMode) {
@@ -455,6 +605,14 @@ export class Game {
         e.y += Math.sin(a) * 30;
       }
     }
+    // The tide against the spire: a creature that reaches the light spends
+    // itself to drain it.
+    for (const e of this.enemies) {
+      if (!e.dead && Math.hypot(e.x - this.spire.x, e.y - this.spire.y) < this.spire.radius + e.radius - 8) {
+        e.dead = true;
+        this.drainSpire(e.def.drain, e.x, e.y);
+      }
+    }
     if (this.boss && !this.boss.dead && Math.hypot(this.boss.x - p.x, this.boss.y - p.y) < this.boss.radius + p.radius - 10) {
       this.damagePlayer();
     }
@@ -462,6 +620,10 @@ export class Game {
       if (!b.dead && Math.hypot(b.x - p.x, b.y - p.y) < b.radius + p.radius - 4) {
         b.dead = true;
         this.damagePlayer();
+      }
+      if (!b.dead && Math.hypot(b.x - this.spire.x, b.y - this.spire.y) < this.spire.radius + b.radius) {
+        b.dead = true;
+        this.drainSpire(REEF_LIGHT_ORB_DRAIN, b.x, b.y);
       }
     }
 
@@ -515,18 +677,27 @@ export class Game {
       this.particles.mote(Math.random() * WORLD.w, 560 + Math.random() * 140, '#5eead4');
     }
 
-    // Rotating tips.
+    // Contextual guidance: the line under the arena reads the situation and
+    // advises, falling back to a slow rotation of general tips.
+    this.tipEvalTimer -= dt;
+    if (this.tipEvalTimer <= 0) {
+      this.tipEvalTimer = 0.5;
+      this.tip = this.contextTip();
+    }
     this.tipTimer += dt;
-    if (this.tipTimer > 7) {
-      this.tipTimer = 0;
-      const tips = [
-        'bend the beam through prisms — reflected light hits harder',
-        'the beam burns void orbs out of the sky',
-        'dash through danger — you cannot be hurt mid-dash',
-        'starlight raises your combo — spend it before it fades',
-        'prism buoys drift with the tide — use the angles',
-      ];
-      this.tip = tips[(Math.random() * tips.length) | 0];
+
+    // Screenshot mode: keep the lantern full and the banner crisp on screen.
+    // (Held at mid-life: the banner fades in from age 0 and out at the end,
+    // so mid-life is where it reads at full opacity.)
+    if (this.shotMode) {
+      p.light = p.lightMax;
+      if (this.banner) {
+        this.banner.age = this.banner.life * 0.4;
+      } else if (this.shotMode === 'boss') {
+        this.showBanner('THE HOLLOW MOON WAKES', 'the Hollow Deep · night 8 — bend every beam you have', '#f0abfc');
+      } else {
+        this.showBanner('PRISM CHAIN ×3', 'reflected light — the tide is breaking', '#67e8f9');
+      }
     }
 
     // Sweep the dead.
@@ -552,30 +723,43 @@ export class Game {
     this.titleTarget.y = 300 + Math.cos(this.t * 0.16) * 90;
     const stub = { spawnEnemyBullet() {} };
     for (const j of this.titleJellies) j.update(dt, this.titleTarget, stub);
-    for (const b of this.buoys) b.update(dt);
+    for (const b of this.titleBuoys) b.update(dt);
     this.moteTimer -= dt;
     if (this.moteTimer <= 0) {
       this.moteTimer = 0.3;
       this.particles.mote(Math.random() * WORLD.w, 560 + Math.random() * 140, '#5eead4');
     }
-    // Demo beam: retargets every few seconds to the most photogenic angle,
-    // easing between targets so the title screen always bends light.
+    // Demo beam: retargets every few seconds, cycling the demo buoys, easing
+    // between targets. The aim prefers traces that stay in the left third,
+    // so the beam never crosses the title text or the SET SAIL button.
     const p = this.player;
-    p.x = 340;
-    p.y = WORLD.h - 160;
+    p.x = 210;
+    p.y = WORLD.h - 120;
+    p.drawScale = 1.6;
     p.bobPhase += dt * 2.2;
     const origin = p.lanternPos();
     this.titleAimTimer -= dt;
     if (this.titleAimTimer <= 0) {
       this.titleAimTimer = 2.6;
-      const best = findBestBeamDir(origin, this.buoys, 2, this.t, this.titleJellies);
-      this.titleAimTarget = Math.atan2(best.dir.y, best.dir.x);
+      let chosen = null;
+      for (let k = 0; k < 3; k++) {
+        const b = this.titleBuoys[(this.titleAimBuoy + k) % 3];
+        const ang = Math.atan2(b.bobY(this.t) - origin.y, b.x - origin.x) + (Math.random() - 0.5) * 0.08;
+        const cand = traceBeam(origin, { x: Math.cos(ang), y: Math.sin(ang) }, this.titleBuoys, 2, this.t);
+        if (k === 0) chosen = ang;
+        if (cand.points.every((pt) => pt.x <= 470 && pt.y >= 130 && pt.y <= 600)) {
+          chosen = ang;
+          this.titleAimBuoy = (this.titleAimBuoy + k + 1) % 3;
+          break;
+        }
+      }
+      this.titleAimTarget = chosen;
     }
     let diff = this.titleAimTarget - this.titleAimAngle;
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
     this.titleAimAngle += diff * Math.min(1, dt * 2.2);
-    const trace = traceBeam(origin, { x: Math.cos(this.titleAimAngle), y: Math.sin(this.titleAimAngle) }, this.buoys, 2, this.t);
+    const trace = traceBeam(origin, { x: Math.cos(this.titleAimAngle), y: Math.sin(this.titleAimAngle) }, this.titleBuoys, 2, this.t);
     this.beamTrace = trace;
     for (const b of trace.hitBuoys) b.flash = 1;
     if (Math.random() < 0.1) {
@@ -653,12 +837,28 @@ export class Game {
       ctx.translate((Math.random() - 0.5) * this.shake, (Math.random() - 0.5) * this.shake);
     }
     this.background.draw(ctx);
-    for (const b of this.buoys) drawBuoy(ctx, b, this.t);
+    const shownBuoys = this.state === 'title' ? this.titleBuoys : this.buoys;
+    for (const b of shownBuoys) drawBuoy(ctx, b, this.t);
+    // The spire anchors the arena, not the title card: behind the title
+    // panel its ring would peek out as a stray circle.
+    if (this.state !== 'title') {
+      drawSpire(ctx, this.spire, this.reefLight / this.reefLightMax, this.t);
+      for (const l of this.lanterns) l.draw(ctx, this.t);
+    }
 
     if (this.state === 'title') {
       for (const j of this.titleJellies) j.draw(ctx, this.t);
       this.player.draw(ctx, this.t);
-      if (this.beamTrace) drawBeam(ctx, this.beamTrace, 9, this.t, false);
+      // The demo beam is clipped to the left third: it can never cross the
+      // title text or the SET SAIL button, whatever angle it takes.
+      if (this.beamTrace) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 130, 470, 460);
+        ctx.clip();
+        drawBeam(ctx, this.beamTrace, 9, this.t, false);
+        ctx.restore();
+      }
       this.particles.draw(ctx);
       ctx.restore();
       drawTitleScreen(ctx, this, this.t, this.input.mouse);
@@ -710,7 +910,9 @@ export class Game {
     if (this.state === 'playing' || this.state === 'relic' || this.paused) {
       drawTopBar(ctx, this);
       drawIncomingPanel(ctx, this);
+      drawReefMap(ctx, this);
       drawRelicsPanel(ctx, this);
+      drawMinimap(ctx, this);
       drawHints(ctx, this.sound.muted);
       drawComboGauge(ctx, this);
       drawDashPip(ctx, this, this.tip);
@@ -744,12 +946,29 @@ export class Game {
       this.night = 4;
       this.startNight(4);
       this.director.queue = [];
+      this.dawnLeft = 84;
+      this.reefLight = 78;
+      // Two prisms already lit, two still dark — the objective reads at once.
+      if (this.buoys[0]) this.buoys[0].lit = true;
+      if (this.buoys[1]) this.buoys[1].lit = true;
+      if (this.lanterns[0]) this.lanterns[0].lit = true;
+      if (this.lanterns[1]) this.lanterns[1].lit = true;
+      this.lanternsLit = 2;
       const spots = [
         ['jelly', 300, 220], ['jelly', 420, 320], ['jelly', 880, 240], ['jelly', 1010, 380],
         ['darter', 240, 420], ['darter', 1060, 300], ['shooter', 200, 200], ['shooter', 1080, 470],
-        ['weaver', 640, 200], ['jelly', 760, 430],
+        ['weaver', 640, 200], ['jelly', 760, 430], ['darter', 560, 260], ['shooter', 760, 560],
       ];
       for (const [type, x, y] of spots) this.spawnEnemy(type, x, y);
+      // One slow jelly drifting toward the spire: the warning tip fires and
+      // the stakes read in a single frame.
+      this.spawnEnemy('jelly', 700, 470);
+      const near = this.enemies[this.enemies.length - 1];
+      near.targetSpire = true;
+      near.speed = 18;
+      // Buff the capture-state creatures so the beam does not clear the
+      // frame before the screenshot lands; game balance is untouched.
+      for (const e of this.enemies) { e.hp *= 3; e.maxHp *= 3; }
       this.player.upgrades.bounces = 1;
       this.player.upgrades.width = 1.3;
       this.player.upgrades.damage = 1.35;
@@ -772,10 +991,17 @@ export class Game {
       this.startGame();
       this.startNight(8);
       this.director.queue = [];
+      this.reefLight = 64;
+      for (const b of this.buoys) b.lit = true;
+      if (this.lanterns[0]) this.lanterns[0].lit = true;
+      this.lanternsLit = 1;
       if (this.boss) this.boss.hp = Math.round(this.boss.maxHp * 0.55);
       this.spawnEnemy('jelly', 300, 320);
       this.spawnEnemy('jelly', 980, 320);
       this.spawnEnemy('darter', 500, 430);
+      this.spawnEnemy('weaver', 830, 460);
+      this.spawnEnemy('shooter', 330, 470);
+      for (const e of this.enemies) { e.hp *= 2; e.maxHp *= 2; }
       this.player.upgrades.bounces = 1;
       this.player.upgrades.width = 1.45;
       this.player.upgrades.damage = 1.7;
@@ -791,13 +1017,19 @@ export class Game {
       this.shotMode = 'boss';
       this.shotReaim = 0;
       this.shotAim = { x: 640, y: 210 };
-      this.showBanner('THE HOLLOW MOON WAKES', 'phase 2 of 3 · the moon remembers every light it ate', '#f0abfc');
+      this.showBanner('THE HOLLOW MOON WAKES', 'the final night — bend every beam you have', '#f0abfc');
     } else if (shot === 'victory') {
       this.startGame();
       this.score = 48230;
       this.starlight = 214;
       this.maxMultiplier = 7;
       this.night = 8;
+      this.dawnLeft = 0;
+      this.reefLight = this.reefLightMax;
+      this.lanternsLit = 9;
+      for (const b of this.buoys) b.lit = true;
+      this.clearedReefs = new Set([0, 1, 2]);
+      this.background.setReef(2);
       this.relics = RELIC_POOL.filter((r) => ['prism-hand', 'sunlit-wick', 'wide-aperture', 'star-magnet', 'chain-lens'].includes(r.id));
       this.beginVictory();
     } else if (shot === 'gameover') {
@@ -806,6 +1038,9 @@ export class Game {
       this.score = 18940;
       this.starlight = 96;
       this.maxMultiplier = 4;
+      this.dawnLeft = 23;
+      this.reefLight = 41;
+      if (this.buoys[0]) this.buoys[0].lit = true;
       this.player.hearts = 0;
       this.beginGameOver();
     }

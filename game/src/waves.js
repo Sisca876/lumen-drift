@@ -85,7 +85,7 @@ export class NightDirector {
         else { x = WORLD.w - 40; y = 140 + Math.random() * (WORLD.h - 220); }
         game.spawnEnemy(type, x, y);
       }
-    } else if (game.enemies.length === 0 && (!game.boss || game.boss.dead)) {
+    } else if (game.enemies.length === 0 && (!game.boss || game.boss.dead) && game.nightClearReady()) {
       this.active = false;
       this.cleared = true;
       game.onNightCleared();

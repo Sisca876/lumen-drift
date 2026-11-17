@@ -61,12 +61,13 @@ export class Player {
       magnet: 1, dashCd: 1, chain: 1, lightCap: 1,
     };
     this.bobPhase = 0;
+    this.drawScale = 1; // the title screen shows the skiff larger
   }
 
   get radius() { return PLAYER_TUNING.radius; }
 
   lanternPos() {
-    return { x: this.x + Math.cos(this.aimAngle) * 6, y: this.y - 26 + Math.sin(this.bobPhase) * 2 };
+    return { x: this.x + Math.cos(this.aimAngle) * 6, y: this.y - 26 * this.drawScale + Math.sin(this.bobPhase) * 2 };
   }
 
   startDash(dir) {
@@ -143,6 +144,7 @@ export class Player {
     const blink = this.invuln > 0 && Math.floor(t * 14) % 2 === 0;
     ctx.save();
     ctx.translate(this.x, this.y + bob);
+    ctx.scale(this.drawScale, this.drawScale);
     if (blink) ctx.globalAlpha = 0.45;
     // Lantern glow + reflection shimmer on the water.
     drawGlow(ctx, 0, -26, 64, '#fcd34d', 0.55);
@@ -231,14 +233,20 @@ export class Enemy {
     this.beamAcc = 0;
     this.spawnT = 0;
     this.dead = false;
+    // Some of the tide is drawn to the Lantern Spire's light instead of the
+    // skiff: jellies drift toward it most of all. (Title-screen jellies get
+    // a stub game with no spire, so they always chase the title target.)
+    const spireOdds = { jelly: 0.6, darter: 0.2, shooter: 0.25, weaver: 0.2 };
+    this.targetSpire = Math.random() < (spireOdds[type] || 0);
   }
 
   update(dt, player, game) {
     this.spawnT += dt;
     this.flash = Math.max(0, this.flash - dt * 6);
     this.wobble += dt * 3;
-    const dx = player.x - this.x;
-    const dy = player.y - this.y;
+    const focus = (this.targetSpire && game && game.spire) ? game.spire : player;
+    const dx = focus.x - this.x;
+    const dy = focus.y - this.y;
     const dist = Math.hypot(dx, dy) || 1;
     const nx = dx / dist;
     const ny = dy / dist;
@@ -606,6 +614,199 @@ export class Shard {
     ctx.fill();
     ctx.restore();
   }
+}
+
+// A wild lantern: dark until the starlance beam touches it. Lighting one
+// feeds the spire and pays starlight.
+export class WildLantern {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    this.radius = 30; // beam touch distance
+    this.lit = false;
+    this.phase = Math.random() * Math.PI * 2;
+    this.flash = 0;
+  }
+
+  update(dt) {
+    this.flash = Math.max(0, this.flash - dt * 2);
+  }
+
+  draw(ctx, t) {
+    const bob = Math.sin(t * 1.2 + this.phase) * 4;
+    const y = this.y + bob;
+    ctx.save();
+    ctx.translate(this.x, y);
+    if (this.lit) {
+      drawGlow(ctx, 0, 0, 54 + this.flash * 26, '#fcd34d', 0.75);
+      // Lit ring.
+      ctx.strokeStyle = 'rgba(252, 211, 77, 0.55)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 24, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      // Beckoning dashed ring so the player knows it wants light.
+      ctx.strokeStyle = 'rgba(253, 230, 138, 0.4)';
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([5, 7]);
+      ctx.lineDashOffset = -t * 14;
+      ctx.beginPath();
+      ctx.arc(0, 0, 26, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // Paper lantern body.
+    ctx.fillStyle = this.lit ? '#fde68a' : '#3f4a6b';
+    ctx.strokeStyle = this.lit ? '#b45309' : '#5b6b94';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 11, 14, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = this.lit ? 'rgba(180, 83, 9, 0.5)' : 'rgba(91, 107, 148, 0.6)';
+    ctx.beginPath();
+    ctx.ellipse(0, -5, 9, 3, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 5, 9, 3, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // Cap + tassel.
+    ctx.fillStyle = this.lit ? '#92400e' : '#2b3352';
+    ctx.fillRect(-5, -17, 10, 4);
+    ctx.strokeStyle = this.lit ? '#f59e0b' : '#4b5878';
+    ctx.beginPath();
+    ctx.moveTo(0, 14);
+    ctx.lineTo(0, 21);
+    ctx.stroke();
+    if (this.lit) {
+      // Flame heart.
+      const flick = 1 + Math.sin(t * 9 + this.phase) * 0.15;
+      ctx.fillStyle = '#fffbeb';
+      ctx.beginPath();
+      ctx.ellipse(0, -1, 3.4 * flick, 5 * flick, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Cold ember.
+      ctx.fillStyle = 'rgba(253, 230, 138, 0.35)';
+      ctx.beginPath();
+      ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+// The Lantern Spire: the arena's anchor and the thing the voyage defends.
+// A crystal tower crowned with a great lantern; the reef-light ring around
+// its base shows how much light the spire has left.
+export function drawSpire(ctx, spire, lightFrac, t) {
+  const { x, y } = spire;
+  const flick = 1 + Math.sin(t * 7) * 0.08 + Math.sin(t * 13.7) * 0.05;
+  const flash = spire.flash || 0;
+  ctx.save();
+  ctx.translate(x, y);
+  // Halo.
+  drawGlow(ctx, 0, -58, 120 * flick, lightFrac > 0.3 ? '#fcd34d' : '#f87171', 0.5 + flash * 0.4);
+  // Reef-light ring around the base.
+  ctx.strokeStyle = 'rgba(5, 8, 31, 0.8)';
+  ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.arc(0, 34, 62, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = lightFrac > 0.3 ? '#fcd34d' : '#f87171';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(0, 34, 62, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, lightFrac));
+  ctx.stroke();
+  // Water ripple.
+  ctx.strokeStyle = 'rgba(103, 232, 249, 0.4)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(0, 44, 52 + Math.sin(t * 1.4) * 3, 12, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  // Stone base.
+  ctx.fillStyle = '#2b3352';
+  ctx.strokeStyle = '#5b6b94';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-34, 44);
+  ctx.lineTo(-26, 16);
+  ctx.lineTo(26, 16);
+  ctx.lineTo(34, 44);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Rune marks on the base.
+  ctx.fillStyle = lightFrac > 0.3 ? 'rgba(252, 211, 77, 0.8)' : 'rgba(248, 113, 113, 0.8)';
+  for (const rx of [-18, 0, 18]) {
+    ctx.beginPath();
+    ctx.arc(rx, 30, 2.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Crystal column.
+  const grad = ctx.createLinearGradient(0, -56, 0, 20);
+  grad.addColorStop(0, '#a5f3fc');
+  grad.addColorStop(0.5, '#22d3ee');
+  grad.addColorStop(1, '#155e75');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(-13, 18);
+  ctx.lineTo(-8, -48);
+  ctx.lineTo(0, -60);
+  ctx.lineTo(8, -48);
+  ctx.lineTo(13, 18);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // Inner light vein.
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(0, 14);
+  ctx.lineTo(0, -50);
+  ctx.stroke();
+  // The great lantern: cage + flame.
+  ctx.fillStyle = '#92400e';
+  ctx.fillRect(-14, -76, 28, 6);
+  ctx.fillRect(-14, -52, 28, 5);
+  ctx.fillStyle = lightFrac > 0.3 ? '#fde68a' : '#7f1d1d';
+  ctx.beginPath();
+  ctx.ellipse(0, -64, 12, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fffbeb';
+  ctx.beginPath();
+  ctx.ellipse(0, -64, 4.5 * flick, 6.5 * flick, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(146, 64, 14, 0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-12, -74);
+  ctx.lineTo(-12, -54);
+  ctx.moveTo(12, -74);
+  ctx.lineTo(12, -54);
+  ctx.stroke();
+  // Crown spike.
+  ctx.strokeStyle = '#fcd34d';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(0, -76);
+  ctx.lineTo(0, -86);
+  ctx.stroke();
+  ctx.fillStyle = '#fef3c7';
+  ctx.beginPath();
+  ctx.arc(0, -88, 3, 0, Math.PI * 2);
+  ctx.fill();
+  if (flash > 0) {
+    ctx.globalAlpha = flash * 0.6;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, 58 + (1 - flash) * 20, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
 }
 
 export class EnemyBullet {

@@ -72,65 +72,93 @@ function bar(ctx, x, y, w, h, frac, fill, back = 'rgba(5, 8, 31, 0.75)') {
 
 // ---------------------------------------------------------------- top bar ---
 
+function formatClock(seconds) {
+  const s = Math.max(0, Math.ceil(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function reefLightBar(ctx, game, y) {
+  const w = 280;
+  const x = WORLD.w / 2 - w / 2;
+  const frac = game.reefLight / game.reefLightMax;
+  bar(ctx, x, y, w, 12, frac, frac > 0.3 ? '#fcd34d' : '#f87171');
+  text(ctx, `REEF LIGHT ${Math.ceil(game.reefLight)}`, WORLD.w / 2, y + 6, {
+    size: 10, color: '#fef3c7', align: 'center', weight: 800,
+  });
+}
+
 export function drawTopBar(ctx, game) {
   const p = game.player;
-  // Left: hull hearts + light meter.
+  // Left: hull hearts + light meter + dawn countdown.
   text(ctx, 'SKIFF', 18, 16, { size: 12, color: '#a5f3fc', weight: 800 });
   for (let i = 0; i < p.maxHearts; i++) heart(ctx, 30 + i * 24, 34, i < p.hearts);
   text(ctx, 'LIGHT', 18, 58, { size: 12, color: '#fde68a', weight: 800 });
   const lightFrac = p.light / p.lightMax;
   bar(ctx, 62, 50, 150, 13, lightFrac, p.beamSputtered ? '#f87171' : '#fcd34d');
   text(ctx, `${Math.ceil(p.light)} / ${Math.ceil(p.lightMax)}`, 220, 57, { size: 12, color: '#fef3c7' });
+  // Dawn countdown: the night's urgency, ticking in the open.
+  if (game.director.isBossNight) {
+    text(ctx, '◷ THE FINAL NIGHT', 18, 84, { size: 13, color: '#f0abfc', weight: 800 });
+  } else if (Number.isFinite(game.dawnLeft) && game.dawnLeft > 0) {
+    const urgent = game.dawnLeft <= 15;
+    const rushing = game.dawnRushing;
+    text(ctx, `◷ DAWN IN ${formatClock(game.dawnLeft)}${rushing ? ' »' : ''}`, 18, 84, {
+      size: 13, color: urgent ? '#f87171' : '#fcd34d', weight: 800,
+    });
+  } else {
+    text(ctx, '◷ DAWN IS HERE', 18, 84, { size: 13, color: '#4ade80', weight: 800 });
+  }
 
-  // Center: night, reef, pips, boss bar, WIN/LOSE.
+  // Center: night, reef, pips, objective, reef light, WIN/LOSE.
   const cx = WORLD.w / 2;
   const nightLabel = game.endless ? `ENDLESS NIGHT ${game.night}` : `NIGHT ${game.night} / 8`;
-  text(ctx, nightLabel, cx, 20, { size: 24, color: '#fef3c7', align: 'center', weight: 800 });
+  text(ctx, nightLabel, cx, 18, { size: 22, color: '#fef3c7', align: 'center', weight: 800 });
   const reef = REEFS[reefForNight(Math.min(game.night, 8))];
-  text(ctx, reef.name, cx, 40, { size: 12, color: '#a5f3fc', align: 'center', weight: 800 });
+  text(ctx, reef.name, cx, 38, { size: 12, color: '#a5f3fc', align: 'center', weight: 800 });
   // Progress pips.
   for (let i = 0; i < 8; i++) {
     const px = cx - 84 + i * 24;
     ctx.save();
     ctx.fillStyle = i < game.night - 1 ? '#fcd34d' : i === game.night - 1 ? '#fef3c7' : 'rgba(254,243,199,0.25)';
     ctx.beginPath();
-    ctx.arc(px, 56, 5, 0, Math.PI * 2);
+    ctx.arc(px, 54, 5, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
   if (game.boss && !game.boss.dead) {
+    text(ctx, BOSS_DEF.name, cx, 74, { size: 15, color: '#f0abfc', align: 'center', weight: 800 });
     const bw = 430;
-    const bx = cx - bw / 2;
-    text(ctx, BOSS_DEF.name, cx, 78, { size: 15, color: '#f0abfc', align: 'center', weight: 800 });
-    bar(ctx, bx, 88, bw, 12, game.boss.hp / game.boss.maxHp, '#c084fc');
-    text(ctx, BOSS_DEF.phases[game.boss.phase - 1], cx, 110, { size: 11, color: '#e9d5ff', align: 'center', weight: 600 });
+    bar(ctx, cx - bw / 2, 84, bw, 12, game.boss.hp / game.boss.maxHp, '#c084fc');
+    text(ctx, BOSS_DEF.phases[game.boss.phase - 1], cx, 108, { size: 11, color: '#e9d5ff', align: 'center', weight: 600 });
+    reefLightBar(ctx, game, 124);
   } else {
-    // WIN / LOSE row.
-    const wy = 78;
-    ctx.save();
-    ctx.font = `800 12px ${FONT}`;
-    ctx.textBaseline = 'middle';
-    const winStr = game.night >= 8 ? 'WIN  sink the Hollow Moon' : 'WIN  clear the night · survive to dawn';
-    const loseStr = 'LOSE  hull reaches 0 hearts';
-    ctx.textAlign = 'right';
-    const ww = ctx.measureText(winStr).width + 18;
-    ctx.fillStyle = 'rgba(34, 197, 94, 0.22)';
-    ctx.strokeStyle = 'rgba(74, 222, 128, 0.6)';
-    ctx.beginPath();
-    ctx.roundRect(cx - ww - 8, wy - 10, ww, 20, 10);
-    ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#bbf7d0';
-    ctx.fillText(winStr, cx - 17, wy);
-    ctx.textAlign = 'left';
-    const lw = ctx.measureText(loseStr).width + 18;
-    ctx.fillStyle = 'rgba(244, 63, 94, 0.22)';
-    ctx.strokeStyle = 'rgba(251, 113, 133, 0.6)';
-    ctx.beginPath();
-    ctx.roundRect(cx + 8, wy - 10, lw, 20, 10);
-    ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#fecdd3';
-    ctx.fillText(loseStr, cx + 17, wy);
-    ctx.restore();
+    // Objective pips: prisms lit by the beam open the way onward.
+    const prisms = game.buoys.filter((b) => b.prism);
+    const lit = prisms.filter((b) => b.lit).length;
+    const total = prisms.length;
+    const done = total > 0 && lit >= total;
+    text(ctx, 'PRISMS', cx - 92, 74, { size: 12, color: done ? '#fcd34d' : '#a5f3fc', weight: 800 });
+    for (let i = 0; i < total; i++) {
+      const px = cx - 30 + i * 18;
+      ctx.save();
+      ctx.translate(px, 74);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = i < lit ? '#fcd34d' : 'rgba(148, 163, 184, 0.4)';
+      ctx.strokeStyle = i < lit ? '#fef3c7' : 'rgba(148, 163, 184, 0.6)';
+      ctx.lineWidth = 1.2;
+      ctx.fillRect(-5, -5, 10, 10);
+      ctx.strokeRect(-5, -5, 10, 10);
+      ctx.restore();
+    }
+    text(ctx, done ? `${lit}/${total} ✓` : `${lit}/${total}`, cx + 92, 74, {
+      size: 12, color: done ? '#4ade80' : '#fef3c7', align: 'right', weight: 800,
+    });
+    reefLightBar(ctx, game, 92);
+    // WIN / LOSE on one line — only while the voyage is still undecided.
+    if (game.state !== 'victory' && game.state !== 'gameover') {
+      text(ctx, 'WIN  clear the night · survive to dawn', cx - 10, 114, { size: 11, color: '#bbf7d0', align: 'right', weight: 700 });
+      text(ctx, 'LOSE  hull 0 or spire dark', cx + 10, 114, { size: 11, color: '#fecdd3', align: 'left', weight: 700 });
+    }
   }
 
   // Right: chain, score, best, starlight.
@@ -144,6 +172,12 @@ export function drawTopBar(ctx, game) {
 
 // ------------------------------------------------------------- side panels ---
 
+export function incomingPanelHeight(game) {
+  const counts = game.director.incomingCounts(game);
+  const rows = Object.keys(ENEMY_DEFS).filter((k) => counts[k] > 0).length;
+  return 34 + rows * 30 + (game.boss && !game.boss.dead ? 26 : 0) + 86;
+}
+
 export function drawIncomingPanel(ctx, game) {
   const x = 14;
   const y = 118;
@@ -151,7 +185,7 @@ export function drawIncomingPanel(ctx, game) {
   const counts = game.director.incomingCounts(game);
   const left = game.director.totalLeft(game);
   const rows = Object.keys(ENEMY_DEFS).filter((k) => counts[k] > 0);
-  const h = 34 + rows.length * 24 + (game.boss && !game.boss.dead ? 26 : 0) + 76;
+  const h = incomingPanelHeight(game);
   panel(ctx, x, y, w, h);
   text(ctx, 'INCOMING', x + 12, y + 16, { size: 13, color: '#fef3c7', weight: 800 });
   text(ctx, `${left} LEFT`, x + w - 12, y + 16, { size: 12, color: '#67e8f9', align: 'right', weight: 800 });
@@ -165,9 +199,10 @@ export function drawIncomingPanel(ctx, game) {
   for (const key of rows) {
     const def = ENEMY_DEFS[key];
     text(ctx, '●', x + 14, ry, { size: 14, color: def.color });
-    text(ctx, def.name, x + 30, ry, { size: 13, color: '#e2e8f0' });
+    text(ctx, def.name, x + 30, ry, { size: 12, color: '#e2e8f0' });
     text(ctx, `${counts[key]}`, x + w - 12, ry, { size: 13, color: '#fef3c7', align: 'right', weight: 800 });
-    ry += 24;
+    text(ctx, def.trait, x + 30, ry + 13, { size: 10, color: '#94a3b8', weight: 600 });
+    ry += 30;
   }
   ctx.save();
   ctx.strokeStyle = 'rgba(103, 232, 249, 0.3)';
@@ -176,12 +211,24 @@ export function drawIncomingPanel(ctx, game) {
   ctx.lineTo(x + w - 12, ry + 2);
   ctx.stroke();
   ctx.restore();
-  const next = game.night < 8
-    ? `NEXT: Night ${game.night + 1} — ${REEFS[reefForNight(Math.min(game.night + 1, 8))].name.toLowerCase()}`
-    : game.endless ? 'NEXT: the tide never ends' : 'NEXT: THE HOLLOW MOON';
-  text(ctx, next, x + 12, ry + 18, { size: 11, color: '#a5f3fc', weight: 600 });
   const reef = REEFS[reefForNight(Math.min(game.night, 8))];
-  wrapText(ctx, reef.flavor, x + 12, ry + 34, w - 24, 11, '#94a3b8');
+  // Footer: two short lines that always fit the panel, then the wrapped
+  // flavor. (The old single NEXT line overflowed the panel's right edge.)
+  let nextMain;
+  let nextSub;
+  if (game.night < 8) {
+    nextMain = `NEXT: NIGHT ${game.night + 1}`;
+    nextSub = REEFS[reefForNight(Math.min(game.night + 1, 8))].name.toLowerCase();
+  } else if (game.endless) {
+    nextMain = 'NEXT: ENDLESS NIGHT';
+    nextSub = 'the tide never ends';
+  } else {
+    nextMain = 'NEXT: THE HOLLOW MOON';
+    nextSub = 'the final night';
+  }
+  text(ctx, nextMain, x + 12, ry + 18, { size: 11, color: '#a5f3fc', weight: 800 });
+  text(ctx, nextSub, x + 12, ry + 34, { size: 11, color: '#67e8f9', weight: 600 });
+  wrapText(ctx, reef.flavor, x + 12, ry + 50, w - 24, 11, '#94a3b8');
 }
 
 export function drawRelicsPanel(ctx, game) {
@@ -204,6 +251,111 @@ export function drawRelicsPanel(ctx, game) {
     text(ctx, r.name, x + 32, ry, { size: 13, color: '#e2e8f0' });
     ry += 24;
   }
+}
+
+// The voyage map: three reefs, where the skiff is, which reefs are clear,
+// and how many wild lanterns the beam has lit tonight. Stacked under the
+// INCOMING panel so the left column reads as one voyage briefing.
+export function drawReefMap(ctx, game) {
+  const x = 14;
+  const y = 118 + incomingPanelHeight(game) + 10;
+  const w = 172;
+  const h = 100;
+  panel(ctx, x, y, w, h);
+  const lit = game.lanterns ? game.lanterns.filter((l) => l.lit).length : 0;
+  const total = game.lanterns ? game.lanterns.length : 0;
+  text(ctx, 'REEF MAP', x + 12, y + 16, { size: 13, color: '#fef3c7', weight: 800 });
+  text(ctx, `◉ ${lit}/${total} LIT`, x + w - 12, y + 16, { size: 11, color: '#fcd34d', align: 'right', weight: 800 });
+  const current = reefForNight(Math.min(game.night, 8));
+  const shorts = ['I · Shallow', 'II · Drowned', 'III · Hollow'];
+  for (let i = 0; i < 3; i++) {
+    const ry = y + 40 + i * 20;
+    if (i < current) {
+      text(ctx, '✓', x + 14, ry, { size: 13, color: '#4ade80', weight: 800 });
+      text(ctx, shorts[i], x + 32, ry, { size: 11, color: '#94a3b8', weight: 600 });
+      text(ctx, 'CLEAR', x + w - 12, ry, { size: 10, color: '#4ade80', align: 'right', weight: 800 });
+    } else if (i === current) {
+      text(ctx, '●', x + 14, ry, { size: 13, color: '#67e8f9', weight: 800 });
+      text(ctx, shorts[i], x + 32, ry, { size: 11, color: '#fef3c7', weight: 800 });
+      text(ctx, 'HERE', x + w - 12, ry, { size: 10, color: '#67e8f9', align: 'right', weight: 800 });
+    } else {
+      text(ctx, '○', x + 14, ry, { size: 13, color: '#64748b', weight: 800 });
+      text(ctx, shorts[i], x + 32, ry, { size: 11, color: '#64748b', weight: 600 });
+      text(ctx, 'DARK', x + w - 12, ry, { size: 10, color: '#64748b', align: 'right', weight: 800 });
+    }
+  }
+}
+
+// Circular chart of the whole arena, live every frame: the skiff, the
+// spire, prisms, lanterns and every creature, as dots on dark water.
+export function drawMinimap(ctx, game) {
+  const cx = WORLD.w - 90;
+  const cy = 352;
+  const r = 60;
+  const s = 0.09; // world -> chart scale (uniform; the world letterboxes)
+  const mx = (x) => cx + (x - WORLD.w / 2) * s;
+  const my = (y) => cy + (y - WORLD.h / 2) * s;
+  text(ctx, 'CHART', cx, cy - r - 10, { size: 10, color: '#67e8f9', align: 'center', weight: 800 });
+  ctx.save();
+  ctx.fillStyle = 'rgba(9, 13, 46, 0.72)';
+  ctx.strokeStyle = 'rgba(103, 232, 249, 0.45)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.clip();
+  // Faint sea + crosshair.
+  ctx.strokeStyle = 'rgba(103, 232, 249, 0.18)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx - r, cy);
+  ctx.lineTo(cx + r, cy);
+  ctx.moveTo(cx, cy - r);
+  ctx.lineTo(cx, cy + r);
+  ctx.stroke();
+  const dot = (x, y, color, rad) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(mx(x), my(y), rad, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  const diamond = (x, y, color, rad) => {
+    ctx.save();
+    ctx.translate(mx(x), my(y));
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = color;
+    ctx.fillRect(-rad, -rad, rad * 2, rad * 2);
+    ctx.restore();
+  };
+  // Prisms and lanterns first (under the actors).
+  for (const b of game.buoys) {
+    diamond(b.x, b.y, b.prism && !b.lit ? 'rgba(148, 163, 184, 0.8)' : '#67e8f9', 3);
+  }
+  if (game.lanterns) {
+    for (const l of game.lanterns) dot(l.x, l.y, l.lit ? '#fcd34d' : 'rgba(253, 230, 138, 0.4)', 2.5);
+  }
+  // The spire: gold diamond, the chart's anchor.
+  if (game.spire) diamond(game.spire.x, game.spire.y, '#fcd34d', 5);
+  for (const e of game.enemies) dot(e.x, e.y, e.def.color, 3);
+  if (game.boss && !game.boss.dead) {
+    dot(game.boss.x, game.boss.y, '#e879f9', 6);
+    ctx.strokeStyle = '#e9d5ff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(mx(game.boss.x), my(game.boss.y), 8, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // The skiff: white, ringed, always on top.
+  dot(game.player.x, game.player.y, '#ffffff', 3.5);
+  ctx.strokeStyle = '#fcd34d';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(mx(game.player.x), my(game.player.y), 5.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function wrapText(ctx, str, x, y, maxW, size, color) {
@@ -231,21 +383,35 @@ function wrapText(ctx, str, x, y, maxW, size, color) {
 
 export const HINTS = [
   ['WASD', 'MOVE'],
-  ['LMB', 'STARLANCE'],
+  ['LMB', 'BEAM'],
   ['SHIFT', 'DASH'],
   ['P', 'PAUSE'],
   ['M', 'SOUND'],
 ];
 
+// Chip widths are measured from the real rendered text, so no label can ever
+// overflow its chip (the old fixed formula clipped "STARLANCE" into the next
+// chip). One shared measuring context keeps geometry identical everywhere.
+let measureCtx = null;
+function hintWidths() {
+  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+  return HINTS.map(([key, label], i) => {
+    measureCtx.font = `800 12px ${FONT}`;
+    const kw = measureCtx.measureText(key).width;
+    measureCtx.font = `700 11px ${FONT}`;
+    const lw = measureCtx.measureText(label).width;
+    return Math.ceil(10 + kw + 8 + lw + 12 + (i === HINTS.length - 1 ? 16 : 0));
+  });
+}
+
 export function hintChipRects() {
+  const widths = hintWidths();
   const rects = [];
   let x = 14;
   const y = WORLD.h - 44;
   for (let i = 0; i < HINTS.length; i++) {
-    const [key] = HINTS[i];
-    const w = key.length * 9 + 62 + (i === HINTS.length - 1 ? 16 : 0);
-    rects.push({ x, y, w, h: 30 });
-    x += w + 8;
+    rects.push({ x, y, w: widths[i], h: 30 });
+    x += widths[i] + 8;
   }
   return rects;
 }
@@ -272,9 +438,10 @@ export function drawHints(ctx, muted) {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#fef3c7';
     ctx.fillText(key, x + 10, y + 15);
+    const keyW = ctx.measureText(key).width;
     ctx.font = `700 11px ${FONT}`;
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText(label, x + 10 + key.length * 9 + 8, y + 15);
+    ctx.fillText(label, x + 10 + keyW + 8, y + 15);
     if (i === HINTS.length - 1) {
       ctx.fillStyle = muted ? '#f87171' : '#4ade80';
       ctx.beginPath();
@@ -516,11 +683,36 @@ export function victoryLayout() {
 }
 
 export function drawVictory(ctx, game, mouse) {
+  const cx = WORLD.w / 2;
+  // Dawn: a warm wash rising from the horizon and a sun climbing out of the
+  // sea behind the panel, so victory glows instead of sitting on flat dark.
   ctx.save();
-  ctx.fillStyle = 'rgba(5, 8, 31, 0.55)';
+  const dawn = ctx.createLinearGradient(0, 0, 0, WORLD.h);
+  dawn.addColorStop(0, 'rgba(251, 191, 36, 0)');
+  dawn.addColorStop(0.45, 'rgba(251, 191, 36, 0.08)');
+  dawn.addColorStop(0.75, 'rgba(249, 115, 22, 0.24)');
+  dawn.addColorStop(1, 'rgba(253, 224, 171, 0.16)');
+  ctx.fillStyle = dawn;
+  ctx.fillRect(0, 0, WORLD.w, WORLD.h);
+  const sunY = 556;
+  const halo = ctx.createRadialGradient(cx, sunY, 10, cx, sunY, 260);
+  halo.addColorStop(0, 'rgba(254, 243, 199, 0.75)');
+  halo.addColorStop(0.4, 'rgba(252, 211, 77, 0.28)');
+  halo.addColorStop(1, 'rgba(252, 211, 77, 0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(cx - 260, sunY - 260, 520, 520);
+  ctx.fillStyle = '#fef3c7';
+  ctx.beginPath();
+  ctx.arc(cx, sunY, 58, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(253, 224, 171, 0.35)';
+  ctx.fillRect(cx - 150, sunY + 4, 300, 3);
+  ctx.fillRect(cx - 110, sunY + 12, 220, 2);
+  ctx.restore();
+  ctx.save();
+  ctx.fillStyle = 'rgba(5, 8, 31, 0.45)';
   ctx.fillRect(0, 0, WORLD.w, WORLD.h);
   ctx.restore();
-  const cx = WORLD.w / 2;
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -538,13 +730,44 @@ export function drawVictory(ctx, game, mouse) {
     ['NIGHTS SURVIVED', `${game.night}`],
     ['STARLIGHT GATHERED', `✦ ${game.starlight}`],
     ['HIGHEST COMBO', `×${game.maxMultiplier}`],
-    ['RELICS HELD', `${game.relics.length}`],
+    ['LANTERNS LIT', `◉ ${game.lanternsLit || 0}`],
   ];
   stats.forEach(([label, value], i) => {
-    const y = 238 + i * 34;
+    const y = 238 + i * 30;
     text(ctx, label, cx - 268, y, { size: 14, color: '#94a3b8', weight: 800 });
     text(ctx, value, cx + 268, y, { size: 17, color: '#fef3c7', align: 'right', weight: 800 });
   });
+  // Relic glyphs carried home, in their own colors.
+  text(ctx, 'RELICS', cx - 268, 428, { size: 13, color: '#94a3b8', weight: 800 });
+  let gx = cx - 190;
+  for (const r of game.relics) {
+    text(ctx, r.glyph, gx, 428, { size: 20, color: r.color, weight: 800 });
+    gx += 30;
+  }
+  if (game.relics.length === 0) {
+    text(ctx, 'none — the light alone was enough', cx - 190, 428, { size: 13, color: '#94a3b8', weight: 600 });
+  }
+  // Final grade seal, stamped beside the report like a wax seal.
+  const grade = gradeForMultiplier(game.maxMultiplier);
+  const sx = cx + 348;
+  const sy = 302;
+  text(ctx, 'FINAL GRADE', sx, 238, { size: 13, color: '#fcd34d', align: 'center', weight: 800 });
+  ctx.save();
+  ctx.fillStyle = grade === 'S' || grade === 'A' ? '#fcd34d' : grade === 'B' ? '#67e8f9' : '#94a3b8';
+  ctx.beginPath();
+  ctx.arc(sx, sy, 44, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#fef3c7';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(sx, sy, 35, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(11, 16, 53, 0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+  text(ctx, grade, sx, sy + 2, { size: 46, color: '#0b1035', align: 'center', weight: 800, outline: false });
+  text(ctx, 'for the voyage', sx, sy + 62, { size: 11, color: '#cbd5e1', align: 'center', weight: 600 });
   const layout = victoryLayout();
   drawButton(ctx, layout.endless, 'SAIL ON — ENDLESS', { hot: pointIn(mouse, layout.endless), sub: 'harder nights, forever' });
   drawButton(ctx, layout.again, 'PLAY AGAIN', { hot: pointIn(mouse, layout.again), sub: 'fresh voyage from night 1' });
@@ -564,8 +787,11 @@ export function drawGameOver(ctx, game, mouse) {
   ctx.fillRect(0, 0, WORLD.w, WORLD.h);
   ctx.restore();
   const cx = WORLD.w / 2;
-  text(ctx, 'THE LANTERN GOES DARK', cx, 150, { size: 48, color: '#fda4af', align: 'center', weight: 800 });
-  text(ctx, `the void keeps night ${game.night} — but the tide brings every lantern home`, cx, 192, { size: 15, color: '#e2e8f0', align: 'center', weight: 600 });
+  const spireLost = game.gameOverReason === 'spire';
+  text(ctx, spireLost ? 'THE SPIRE GOES DARK' : 'THE LANTERN GOES DARK', cx, 150, { size: 48, color: '#fda4af', align: 'center', weight: 800 });
+  text(ctx, spireLost
+    ? `the reef light is spent on night ${game.night} — guard the spire, and the tide brings every lantern home`
+    : `the void keeps night ${game.night} — but the tide brings every lantern home`, cx, 192, { size: 15, color: '#e2e8f0', align: 'center', weight: 600 });
   panel(ctx, cx - 300, 226, 600, 200);
   const stats = [
     ['SCORE', game.score.toLocaleString()],

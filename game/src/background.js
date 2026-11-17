@@ -61,6 +61,34 @@ export class Background {
         r: 1 + rng() * 1.8,
       });
     }
+    // Reef silhouettes: two jagged ridgelines rising out of the sea at the
+    // horizon, generated once so the skyline never shimmers.
+    this.ridges = [];
+    for (let layer = 0; layer < 2; layer++) {
+      const pts = [];
+      const base = SEA_Y + (layer === 0 ? 2 : 16);
+      const peak = layer === 0 ? 46 : 26;
+      let x = -20;
+      while (x < WORLD.w + 40) {
+        const wSeg = 50 + rng() * 90;
+        pts.push({ x, y: base - rng() * peak });
+        x += wSeg;
+      }
+      this.ridges.push({ pts, base, color: layer === 0 ? '#232c5e' : '#1a2148', drift: layer === 0 ? 3 : 6 });
+    }
+    // Ambient sky lanterns: tiny paper lanterns drifting far above the sea,
+    // pulsing warm. Decoration only — the gameplay lanterns are bigger and
+    // ringed, so the two never read the same.
+    this.skyLanterns = [];
+    for (let i = 0; i < 6; i++) {
+      this.skyLanterns.push({
+        x: rng() * WORLD.w,
+        y: 110 + rng() * 190,
+        speed: 4 + rng() * 6,
+        tw: rng() * Math.PI * 2,
+        s: 0.7 + rng() * 0.5,
+      });
+    }
     this.skyGrad = null;
     this.seaGrad = null;
   }
@@ -81,27 +109,29 @@ export class Background {
     ctx.fillRect(0, 0, w, SEA_Y + 2);
     ctx.drawImage(this.nebula, 0, 0);
 
-    // Distant moon with a soft halo.
-    ctx.save();
-    const mx = 1090;
-    const my = 84;
-    const halo = ctx.createRadialGradient(mx, my, 10, mx, my, 90);
-    halo.addColorStop(0, 'rgba(254, 243, 199, 0.5)');
-    halo.addColorStop(0.35, 'rgba(254, 243, 199, 0.14)');
-    halo.addColorStop(1, 'rgba(254, 243, 199, 0)');
-    ctx.fillStyle = halo;
-    ctx.fillRect(mx - 90, my - 90, 180, 180);
-    ctx.fillStyle = '#fdf6d8';
-    ctx.beginPath();
-    ctx.arc(mx, my, 30, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(180, 190, 230, 0.5)';
-    ctx.beginPath();
-    ctx.arc(mx - 10, my - 6, 7, 0, Math.PI * 2);
-    ctx.arc(mx + 9, my + 9, 5, 0, Math.PI * 2);
-    ctx.arc(mx + 12, my - 12, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    // Thin aurora ribbons: slow undulating bands of teal and violet light.
+    for (let i = 0; i < 2; i++) {
+      const baseY = 56 + i * 52;
+      const amp = 16 + i * 8;
+      const color = i === 0 ? '45, 212, 191' : '167, 139, 250';
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(0, baseY);
+      for (let x = 0; x <= w; x += 24) {
+        ctx.lineTo(x, baseY + Math.sin(x / 260 + this.t * 0.24 + i * 2.1) * amp);
+      }
+      for (let x = w; x >= 0; x -= 24) {
+        ctx.lineTo(x, baseY + 26 + Math.sin(x / 220 + this.t * 0.2 + i * 2.1 + 1) * amp);
+      }
+      ctx.closePath();
+      const ag = ctx.createLinearGradient(0, baseY - amp, 0, baseY + 30 + amp);
+      ag.addColorStop(0, `rgba(${color}, 0)`);
+      ag.addColorStop(0.5, `rgba(${color}, ${0.13 - i * 0.03})`);
+      ag.addColorStop(1, `rgba(${color}, 0)`);
+      ctx.fillStyle = ag;
+      ctx.fill();
+      ctx.restore();
+    }
 
     // Parallax starfield with twinkle.
     for (let l = 0; l < this.layers.length; l++) {
@@ -116,6 +146,86 @@ export class Background {
       }
     }
     ctx.globalAlpha = 1;
+
+    // The moon, clean and phased: full over the Shallow Gleam, gibbous over
+    // the Drowned Choir, crescent over the Hollow Deep. The shadow is a
+    // sky-toned disc, so no grey smudge ever sits on the lit face.
+    ctx.save();
+    const mx = 1090;
+    const my = 84;
+    const halo = ctx.createRadialGradient(mx, my, 10, mx, my, 90);
+    halo.addColorStop(0, 'rgba(254, 243, 199, 0.5)');
+    halo.addColorStop(0.35, 'rgba(254, 243, 199, 0.14)');
+    halo.addColorStop(1, 'rgba(254, 243, 199, 0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(mx - 90, my - 90, 180, 180);
+    const moonGrad = ctx.createRadialGradient(mx - 8, my - 10, 4, mx, my, 30);
+    moonGrad.addColorStop(0, '#fffdf0');
+    moonGrad.addColorStop(0.7, '#fdf6d8');
+    moonGrad.addColorStop(1, '#efe6bd');
+    ctx.fillStyle = moonGrad;
+    ctx.beginPath();
+    ctx.arc(mx, my, 30, 0, Math.PI * 2);
+    ctx.fill();
+    // Whisper-soft craters, drawn before the phase shadow covers them.
+    ctx.fillStyle = 'rgba(201, 194, 168, 0.28)';
+    ctx.beginPath();
+    ctx.arc(mx - 10, my - 6, 5, 0, Math.PI * 2);
+    ctx.arc(mx + 9, my + 9, 3.6, 0, Math.PI * 2);
+    ctx.arc(mx + 11, my - 12, 3, 0, Math.PI * 2);
+    ctx.fill();
+    const phaseShift = [0, 16, 34][this.reef] || 0;
+    if (phaseShift > 0) {
+      const shadow = ctx.createLinearGradient(mx, my - 30, mx, my + 30);
+      shadow.addColorStop(0, 'rgba(26, 37, 96, 0.96)');
+      shadow.addColorStop(1, 'rgba(43, 58, 147, 0.96)');
+      ctx.fillStyle = shadow;
+      ctx.beginPath();
+      ctx.arc(mx + phaseShift, my, 30, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Ambient sky lanterns drifting far above the sea.
+    for (const l of this.skyLanterns) {
+      const lx = (l.x + this.t * l.speed) % (w + 30) - 15;
+      const ly = l.y + Math.sin(this.t * 0.5 + l.tw) * 8;
+      const pulse = 0.55 + 0.35 * Math.sin(this.t * 1.6 + l.tw);
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      const lg = ctx.createRadialGradient(lx, ly, 0, lx, ly, 22 * l.s);
+      lg.addColorStop(0, 'rgba(252, 211, 77, 0.55)');
+      lg.addColorStop(1, 'rgba(252, 211, 77, 0)');
+      ctx.fillStyle = lg;
+      ctx.fillRect(lx - 22 * l.s, ly - 22 * l.s, 44 * l.s, 44 * l.s);
+      ctx.fillStyle = '#fde68a';
+      ctx.beginPath();
+      ctx.ellipse(lx, ly, 5 * l.s, 7 * l.s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Reef silhouettes rising out of the sea at the horizon.
+    for (const ridge of this.ridges) {
+      const off = (this.t * ridge.drift) % 60;
+      ctx.fillStyle = ridge.color;
+      ctx.beginPath();
+      ctx.moveTo(-20 - off, ridge.base + 20);
+      for (const p of ridge.pts) ctx.lineTo(p.x - off, p.y);
+      ctx.lineTo(WORLD.w + 40 - off, ridge.base + 20);
+      ctx.closePath();
+      ctx.fill();
+      // A few coral glimmers on the near ridge.
+      if (ridge.drift === 6) {
+        ctx.fillStyle = 'rgba(45, 212, 191, 0.5)';
+        for (let i = 0; i < ridge.pts.length; i += 3) {
+          const p = ridge.pts[i];
+          ctx.beginPath();
+          ctx.arc(p.x - off, p.y + 8, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
 
     // The sea: deep gradient + three travelling sine crests + sparkles.
     if (!this.seaGrad) {

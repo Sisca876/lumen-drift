@@ -90,10 +90,10 @@ export const NIGHTS = [
 ];
 
 export const ENEMY_DEFS = {
-  jelly: { name: 'Gloom Jelly', hp: 14, speed: 62, radius: 22, score: 50, color: PALETTE.jelly, core: PALETTE.jellyCore, contact: 1 },
-  darter: { name: 'Rift Darter', hp: 10, speed: 96, radius: 16, score: 60, color: PALETTE.darter, core: PALETTE.darterCore, contact: 1 },
-  shooter: { name: 'Hollow Spitter', hp: 20, speed: 52, radius: 20, score: 80, color: PALETTE.shooter, core: PALETTE.shooterCore, contact: 1 },
-  weaver: { name: 'Choir Weaver', hp: 26, speed: 58, radius: 22, score: 110, color: PALETTE.weaver, core: PALETTE.weaverCore, contact: 1 },
+  jelly: { name: 'Gloom Jelly', trait: 'swarms', hp: 14, speed: 62, radius: 22, score: 50, drain: 6, color: PALETTE.jelly, core: PALETTE.jellyCore, contact: 1 },
+  darter: { name: 'Rift Darter', trait: 'lunges', hp: 10, speed: 96, radius: 16, score: 60, drain: 8, color: PALETTE.darter, core: PALETTE.darterCore, contact: 1 },
+  shooter: { name: 'Hollow Spitter', trait: 'ranged', hp: 20, speed: 52, radius: 20, score: 80, drain: 8, color: PALETTE.shooter, core: PALETTE.shooterCore, contact: 1 },
+  weaver: { name: 'Choir Weaver', trait: 'fan-shot', hp: 26, speed: 58, radius: 22, score: 110, drain: 10, color: PALETTE.weaver, core: PALETTE.weaverCore, contact: 1 },
 };
 
 export const BOSS_DEF = {
@@ -108,13 +108,38 @@ export const BOSS_DEF = {
   ],
 };
 
-// Prism buoy layouts, one per reef. Buoys bend the starlance beam.
+// How long until dawn breaks on each night (seconds). The night clears when
+// dawn arrives, the field is clear and the prisms are lit — and dawn hurries
+// (4x) once the sea is clear, so a fast sailor never waits on the clock.
+export const NIGHT_DURATIONS = [75, 85, 95, 105, 115, 125, 135, Infinity];
+export const ENDLESS_NIGHT_DURATION = 120;
+
+// The Lantern Spire: the heart of the arena. Enemies that reach it drain the
+// reef light; if the light dies, the voyage ends.
+export const SPIRE = { x: 640, y: 360, radius: 46, collide: 50 };
+export const REEF_LIGHT_MAX = 100;
+export const REEF_LIGHT_NIGHT_BONUS = 30;
+export const REEF_LIGHT_LANTERN_BONUS = 4;
+export const REEF_LIGHT_ORB_DRAIN = 3;
+
+// Wild lanterns: three per reef, lit by the beam. Lighting one feeds the
+// spire (+reef light) and pays starlight.
+export const LANTERN_LAYOUTS = [
+  [{ x: 170, y: 200 }, { x: 1110, y: 220 }, { x: 900, y: 470 }],
+  [{ x: 150, y: 300 }, { x: 1130, y: 300 }, { x: 640, y: 130 }],
+  [{ x: 200, y: 460 }, { x: 1080, y: 460 }, { x: 640, y: 120 }],
+];
+
+// Prism buoy layouts, one per reef. Buoys bend the starlance beam. The first
+// four buoys of each layout are the night's dark prisms: light them all with
+// the beam to open the way to the next night. Layouts keep clear of the
+// Lantern Spire at (640, 360).
 export const BUOY_LAYOUTS = [
   [ // reef 1 — open triangle pair, easy first chains
     { x: 330, y: 300 }, { x: 950, y: 300 }, { x: 640, y: 180 }, { x: 640, y: 470 },
   ],
-  [ // reef 2 — diamond, longer diagonals
-    { x: 240, y: 210 }, { x: 1040, y: 210 }, { x: 240, y: 480 }, { x: 1040, y: 480 }, { x: 640, y: 330 },
+  [ // reef 2 — diamond, longer diagonals (center buoy rides high, clear of the spire)
+    { x: 240, y: 210 }, { x: 1040, y: 210 }, { x: 240, y: 480 }, { x: 1040, y: 480 }, { x: 640, y: 210 },
   ],
   [ // reef 3 — wide ring for boss-night geometry
     { x: 200, y: 300 }, { x: 480, y: 160 }, { x: 800, y: 160 }, { x: 1080, y: 300 }, { x: 640, y: 490 },
