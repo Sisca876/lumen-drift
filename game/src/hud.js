@@ -126,11 +126,31 @@ export function drawTopBar(ctx, game) {
     ctx.restore();
   }
   if (game.boss && !game.boss.dead) {
-    text(ctx, BOSS_DEF.name, cx, 74, { size: 15, color: '#f0abfc', align: 'center', weight: 800 });
-    const bw = 430;
-    bar(ctx, cx - bw / 2, 84, bw, 12, game.boss.hp / game.boss.maxHp, '#c084fc');
-    text(ctx, BOSS_DEF.phases[game.boss.phase - 1], cx, 108, { size: 11, color: '#e9d5ff', align: 'center', weight: 600 });
-    reefLightBar(ctx, game, 124);
+    // The boss bar is a marquee: wide, glowing, with phase pips that fill
+    // as the Hollow Moon weakens — the fight's progress at one glance.
+    text(ctx, BOSS_DEF.name, cx, 66, { size: 17, color: '#f0abfc', align: 'center', weight: 800 });
+    for (let i = 0; i < 3; i++) {
+      const px = cx - 24 + i * 24;
+      const reached = game.boss.phase > i;
+      const current = game.boss.phase === i + 1;
+      ctx.save();
+      ctx.translate(px, 80);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = reached ? '#e879f9' : 'rgba(233, 213, 255, 0.25)';
+      ctx.strokeStyle = current ? '#fef3c7' : 'rgba(233, 213, 255, 0.6)';
+      ctx.lineWidth = current ? 2 : 1.2;
+      ctx.fillRect(-5, -5, 10, 10);
+      ctx.strokeRect(-5, -5, 10, 10);
+      ctx.restore();
+    }
+    const bw = 480;
+    ctx.save();
+    ctx.shadowColor = 'rgba(192, 132, 252, 0.8)';
+    ctx.shadowBlur = 14;
+    bar(ctx, cx - bw / 2, 88, bw, 15, game.boss.hp / game.boss.maxHp, '#c084fc');
+    ctx.restore();
+    text(ctx, BOSS_DEF.phases[game.boss.phase - 1], cx, 114, { size: 12, color: '#e9d5ff', align: 'center', weight: 700 });
+    reefLightBar(ctx, game, 126);
   } else {
     // Objective pips: prisms lit by the beam open the way onward.
     const prisms = game.buoys.filter((b) => b.prism);
@@ -574,10 +594,16 @@ export function drawTitleScreen(ctx, game, t, mouse) {
   text(ctx, 'a lantern voyage across the night sea', cx, 172, { size: 20, color: '#a5f3fc', align: 'center', weight: 600, outline: false });
   text(ctx, 'Surf the glow. Bend the beam. Outlast the dark.', cx, 198, { size: 15, color: '#e2e8f0', align: 'center', weight: 600 });
 
-  // Reef chips.
-  const reefs = ['I · THE SHALLOW GLEAM', 'II · THE DROWNED CHOIR', 'III · THE HOLLOW DEEP'];
+  // Reef chips: the voyage strip — one small icon per reef, so the journey
+  // reads before a single wave is sailed. Chevrons between the chips mark
+  // the way onward.
+  const reefs = [
+    { label: 'I · THE SHALLOW GLEAM', icon: 'prism' },
+    { label: 'II · THE DROWNED CHOIR', icon: 'wave' },
+    { label: 'III · THE HOLLOW DEEP', icon: 'moon' },
+  ];
   let rx = cx - 330;
-  for (const r of reefs) {
+  reefs.forEach((reef, i) => {
     ctx.save();
     ctx.fillStyle = 'rgba(9, 13, 46, 0.8)';
     ctx.strokeStyle = 'rgba(103, 232, 249, 0.4)';
@@ -586,9 +612,53 @@ export function drawTitleScreen(ctx, game, t, mouse) {
     ctx.fill();
     ctx.stroke();
     ctx.restore();
-    text(ctx, r, rx + 106, 237, { size: 12, color: '#e2e8f0', align: 'center', weight: 800 });
+    // The reef's mark, drawn in the chip's left pocket.
+    const ix = rx + 22;
+    const iy = 237;
+    if (reef.icon === 'prism') {
+      ctx.save();
+      ctx.fillStyle = '#67e8f9';
+      ctx.beginPath();
+      ctx.moveTo(ix, iy - 9);
+      ctx.lineTo(ix + 6, iy);
+      ctx.lineTo(ix, iy + 9);
+      ctx.lineTo(ix - 6, iy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(ix, iy, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (reef.icon === 'wave') {
+      ctx.save();
+      ctx.strokeStyle = '#a78bfa';
+      ctx.lineWidth = 2;
+      for (const dy of [-4, 2]) {
+        ctx.beginPath();
+        ctx.arc(ix - 3, iy + dy, 5, Math.PI * 1.15, Math.PI * 1.85);
+        ctx.arc(ix + 3, iy + dy, 5, Math.PI * 1.15, Math.PI * 1.85);
+        ctx.stroke();
+      }
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.fillStyle = '#e8ecf7';
+      ctx.beginPath();
+      ctx.arc(ix, iy, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(9, 13, 46, 0.95)';
+      ctx.beginPath();
+      ctx.arc(ix + 4, iy - 2, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    text(ctx, reef.label, rx + 116, 237, { size: 12, color: '#e2e8f0', align: 'center', weight: 800 });
+    if (i < reefs.length - 1) {
+      text(ctx, '›', rx + 218, 237, { size: 16, color: '#67e8f9', align: 'center', weight: 800, outline: false });
+    }
     rx += 224;
-  }
+  });
 
   // How it plays.
   panel(ctx, cx - 330, 272, 660, 128);
@@ -713,6 +783,53 @@ export function drawVictory(ctx, game, mouse) {
   ctx.fillStyle = 'rgba(5, 8, 31, 0.45)';
   ctx.fillRect(0, 0, WORLD.w, WORLD.h);
   ctx.restore();
+  // The skiff sails home into the sunrise: a dark silhouette with one warm
+  // lantern, crossing the open water between the report and the buttons.
+  {
+    const sx = cx + 195;
+    const sy = 492;
+    const bob = Math.sin(game.t * 2.2) * 1.5;
+    ctx.save();
+    ctx.translate(sx, sy + bob);
+    // Wake: fading light streaks behind the hull.
+    ctx.strokeStyle = 'rgba(252, 211, 77, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(34, 8);
+    ctx.lineTo(78, 12);
+    ctx.moveTo(30, 14);
+    ctx.lineTo(64, 18);
+    ctx.stroke();
+    // Hull, bow pointing toward the dawn.
+    ctx.fillStyle = 'rgba(5, 8, 31, 0.92)';
+    ctx.beginPath();
+    ctx.moveTo(-38, -2);
+    ctx.quadraticCurveTo(-22, 12, 0, 13);
+    ctx.quadraticCurveTo(22, 12, 38, -2);
+    ctx.quadraticCurveTo(18, 2, 0, 2);
+    ctx.quadraticCurveTo(-18, 2, -38, -2);
+    ctx.closePath();
+    ctx.fill();
+    // Mast + lantern, the one warm light aboard.
+    ctx.strokeStyle = 'rgba(5, 8, 31, 0.92)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-4, 0);
+    ctx.lineTo(-4, -30);
+    ctx.stroke();
+    const lg = ctx.createRadialGradient(-4, -32, 0, -4, -32, 18);
+    lg.addColorStop(0, 'rgba(252, 211, 77, 0.8)');
+    lg.addColorStop(1, 'rgba(252, 211, 77, 0)');
+    ctx.fillStyle = lg;
+    ctx.beginPath();
+    ctx.arc(-4, -32, 18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fde68a';
+    ctx.beginPath();
+    ctx.arc(-4, -32, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

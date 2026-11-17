@@ -89,6 +89,23 @@ export class Background {
         s: 0.7 + rng() * 0.5,
       });
     }
+    // Sea fireflies: drifting plankton motes, half in the air above the
+    // water and half glowing just under its surface. They wander slowly and
+    // pulse, so the night always feels alive even between waves.
+    this.plankton = [];
+    const planktonColors = ['#5eead4', '#fcd34d', '#c4b5fd', '#a7f3d0'];
+    for (let i = 0; i < 46; i++) {
+      const inSea = i % 2 === 0;
+      this.plankton.push({
+        x: rng() * WORLD.w,
+        y: inSea ? SEA_Y + 20 + rng() * (WORLD.h - SEA_Y - 30) : 100 + rng() * (SEA_Y - 130),
+        r: 1 + rng() * 1.7,
+        tw: rng() * Math.PI * 2,
+        drift: 3 + rng() * 7,
+        bob: 4 + rng() * 8,
+        color: planktonColors[(rng() * planktonColors.length) | 0],
+      });
+    }
     this.skyGrad = null;
     this.seaGrad = null;
   }
@@ -255,6 +272,8 @@ export class Background {
     crest(7, 130, 0.8, 34, '#2dd4bf', 0.4, 2);
     crest(6, 240, 1.4, 62, '#99f6e4', 0.3, 2);
     crest(8, 110, 0.6, 96, '#14b8a6', 0.28, 2);
+    crest(4, 300, 1.8, 128, '#99f6e4', 0.22, 1.5);
+    crest(9, 90, 0.5, 150, '#0d9488', 0.2, 2);
 
     // Horizon glow line where sky meets sea.
     ctx.save();
@@ -271,6 +290,26 @@ export class Background {
       ctx.fillStyle = PALETTE.seaSpark;
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+
+    // Sea fireflies: drifting, pulsing plankton over the whole night.
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const m of this.plankton) {
+      const x = (m.x + this.t * m.drift) % (w + 20) - 10;
+      const y = m.y + Math.sin(this.t * 0.6 + m.tw) * m.bob;
+      const a = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(this.t * 1.9 + m.tw));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = m.color;
+      ctx.beginPath();
+      ctx.arc(x, y, m.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = a * 0.25;
+      ctx.beginPath();
+      ctx.arc(x, y, m.r * 2.6, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();

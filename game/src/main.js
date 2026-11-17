@@ -2,7 +2,7 @@
 // relic choice, victory, game over), the loop, beam combat, scoring, combo,
 // screen shake and the screenshot hooks the maker uses to capture the game.
 
-import { WORLD, PLAYER_TUNING, BEAM_TUNING, COMBO_TUNING, REEFS, reefForNight, ENEMY_DEFS, BOSS_DEF, SPIRE, REEF_LIGHT_MAX, REEF_LIGHT_NIGHT_BONUS, REEF_LIGHT_LANTERN_BONUS, REEF_LIGHT_ORB_DRAIN, NIGHT_DURATIONS, ENDLESS_NIGHT_DURATION, LANTERN_LAYOUTS } from './config.js';
+import { WORLD, SEA_Y, PLAYER_TUNING, BEAM_TUNING, COMBO_TUNING, REEFS, reefForNight, ENEMY_DEFS, BOSS_DEF, SPIRE, REEF_LIGHT_MAX, REEF_LIGHT_NIGHT_BONUS, REEF_LIGHT_LANTERN_BONUS, REEF_LIGHT_ORB_DRAIN, NIGHT_DURATIONS, ENDLESS_NIGHT_DURATION, LANTERN_LAYOUTS } from './config.js';
 import { SoundEngine } from './audio.js';
 import { Input } from './input.js';
 import { Particles } from './particles.js';
@@ -797,14 +797,21 @@ export class Game {
   updateVictory(dt) {
     this.fireworkTimer -= dt;
     if (this.fireworkTimer <= 0) {
-      this.fireworkTimer = 0.38;
-      const colors = [['#fcd34d', '#fef3c7'], ['#67e8f9', '#a5f3fc'], ['#f0abfc', '#e9d5ff']];
-      for (let k = 0; k < 2; k++) {
+      this.fireworkTimer = 0.3;
+      const colors = [['#fcd34d', '#fef3c7'], ['#67e8f9', '#a5f3fc'], ['#f0abfc', '#e9d5ff'], ['#4ade80', '#bbf7d0']];
+      for (let k = 0; k < 3; k++) {
         const pick = colors[(Math.random() * colors.length) | 0];
-        const fx = 160 + Math.random() * 960;
-        const fy = 110 + Math.random() * 220;
-        this.particles.burst(fx, fy, { colors: pick, count: 26, speed: 280, life: 1.15 });
-        this.particles.ring(fx, fy, pick[0], 70, 0.7);
+        const fx = 140 + Math.random() * 1000;
+        const fy = 100 + Math.random() * 240;
+        this.particles.burst(fx, fy, { colors: pick, count: 34, speed: 300, life: 1.2 });
+        this.particles.ring(fx, fy, pick[0], 80, 0.7);
+      }
+      // Every few volleys, one great golden bloom over the dawn.
+      if (Math.random() < 0.3) {
+        this.particles.burst(640 + (Math.random() - 0.5) * 300, 150 + Math.random() * 80, {
+          colors: ['#fcd34d', '#fef3c7', '#f59e0b'], count: 60, speed: 380, life: 1.4,
+        });
+        this.particles.ring(640, 180, '#fcd34d', 130, 0.9, 5);
       }
     }
     const layout = victoryLayout();
@@ -874,6 +881,30 @@ export class Game {
     // The starlance beam, above the actors.
     if (this.beamTrace && this.beamOn) {
       drawBeam(ctx, this.beamTrace, 9 * this.player.upgrades.width, this.t, this.chain >= 3);
+      // Light on the water: the beam's glow shimmers back from the sea
+      // surface beneath it, so the starlance lights the whole night.
+      const pts = this.beamTrace.points;
+      let sx = 0;
+      for (const p of pts) sx += p.x;
+      sx /= pts.length;
+      const rx = Math.max(90, Math.min(WORLD.w - 90, sx));
+      const shimmer = 0.5 + 0.5 * Math.sin(this.t * 3.1);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const streaks = [
+        { y: SEA_Y + 16, w: 240, a: 0.20 },
+        { y: SEA_Y + 34, w: 170, a: 0.15 },
+        { y: SEA_Y + 54, w: 110, a: 0.10 },
+      ];
+      for (const s of streaks) {
+        const g = ctx.createLinearGradient(rx - s.w / 2, 0, rx + s.w / 2, 0);
+        g.addColorStop(0, 'rgba(253, 230, 138, 0)');
+        g.addColorStop(0.5, `rgba(253, 230, 138, ${s.a * (0.6 + 0.4 * shimmer)})`);
+        g.addColorStop(1, 'rgba(253, 230, 138, 0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(rx - s.w / 2, s.y, s.w, 3);
+      }
+      ctx.restore();
     }
     // Aim preview: a faint dotted line while the beam rests.
     if (this.state === 'playing' && !this.beamOn && !this.paused) {
@@ -919,12 +950,12 @@ export class Game {
       drawBanner(ctx, this.banner);
     }
     if (this.state === 'relic') drawRelicChoice(ctx, this, this.input.mouse);
+    // End screens carry their own report: the voyage HUD stays hidden, so
+    // no bar ever pierces the victory title or the game-over headline.
     if (this.state === 'victory') {
-      drawTopBar(ctx, this);
       drawVictory(ctx, this, this.input.mouse);
     }
     if (this.state === 'gameover') {
-      drawTopBar(ctx, this);
       drawGameOver(ctx, this, this.input.mouse);
     }
     if (this.paused && this.state === 'playing') drawPause(ctx);
@@ -958,8 +989,20 @@ export class Game {
         ['jelly', 300, 220], ['jelly', 420, 320], ['jelly', 880, 240], ['jelly', 1010, 380],
         ['darter', 240, 420], ['darter', 1060, 300], ['shooter', 200, 200], ['shooter', 1080, 470],
         ['weaver', 640, 200], ['jelly', 760, 430], ['darter', 560, 260], ['shooter', 760, 560],
+        // The right flank reads empty in the last capture: pack it so the
+        // whole arena hums, clear of the RELICS panel and the CHART.
+        ['weaver', 920, 500], ['shooter', 1150, 480], ['jelly', 900, 170],
+        ['darter', 980, 540], ['jelly', 1180, 560], ['weaver', 860, 330],
       ];
       for (const [type, x, y] of spots) this.spawnEnemy(type, x, y);
+      // Void orbs mid-flight and starlight on the water: the frame should
+      // feel mid-battle, not posed.
+      this.spawnEnemyBullet(200, 200, 0.8, 0.45, 120);
+      this.spawnEnemyBullet(1080, 470, -0.75, -0.4, 120);
+      this.spawnEnemyBullet(760, 560, -0.3, -0.8, 110);
+      for (const [sx, sy] of [[480, 500], [820, 520], [380, 460], [980, 420], [700, 540]]) {
+        this.shards.push(new Shard(sx, sy));
+      }
       // One slow jelly drifting toward the spire: the warning tip fires and
       // the stakes read in a single frame.
       this.spawnEnemy('jelly', 700, 470);
@@ -1001,6 +1044,18 @@ export class Game {
       this.spawnEnemy('darter', 500, 430);
       this.spawnEnemy('weaver', 830, 460);
       this.spawnEnemy('shooter', 330, 470);
+      // A brood swarming the moon: jellies ringed around the boss, so the
+      // Hollow Moon reads as the heart of the tide, not a lone balloon.
+      for (const [bx, by] of [[480, 170], [800, 170], [540, 300], [740, 300], [640, 120]]) {
+        this.spawnEnemy('jelly', bx, by);
+      }
+      // The eclipse attack, already in the air: a slow spiral of moon orbs
+      // blooming around the boss for the capture.
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        this.spawnEnemyBullet(640, 210, Math.cos(a), Math.sin(a), 55);
+      }
+      this.particles.ring(640, 210, '#c084fc', 190, 1.6, 5);
       for (const e of this.enemies) { e.hp *= 2; e.maxHp *= 2; }
       this.player.upgrades.bounces = 1;
       this.player.upgrades.width = 1.45;

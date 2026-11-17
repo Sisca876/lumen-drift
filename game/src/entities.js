@@ -233,6 +233,11 @@ export class Enemy {
     this.beamAcc = 0;
     this.spawnT = 0;
     this.dead = false;
+    // Visual variety: no two creatures of a kind read identical — each one
+    // is a little bigger or smaller, and glows a little hotter or colder.
+    // Collision radius stays exactly as tuned; only the drawing varies.
+    this.sizeVar = rand(0.88, 1.18);
+    this.glowVar = rand(0.8, 1.25);
     // Some of the tide is drawn to the Lantern Spire's light instead of the
     // skiff: jellies drift toward it most of all. (Title-screen jellies get
     // a stub game with no spire, so they always chase the title target.)
@@ -308,8 +313,8 @@ export class Enemy {
     const pulse = 1 + Math.sin(this.wobble * 1.4) * 0.07;
     ctx.save();
     ctx.translate(this.x, this.y);
-    ctx.scale(spawnScale * pulse, spawnScale * pulse);
-    drawGlow(ctx, 0, 0, this.radius * 2.1, this.def.color, 0.5);
+    ctx.scale(spawnScale * pulse * this.sizeVar, spawnScale * pulse * this.sizeVar);
+    drawGlow(ctx, 0, 0, this.radius * 2.1, this.def.color, 0.5 * this.glowVar);
     if (this.flash > 0) {
       ctx.globalAlpha = 0.9;
       ctx.fillStyle = '#ffffff';
@@ -475,12 +480,14 @@ export class Boss {
       const speed = this.phase === 3 ? 0.85 : this.phase === 2 ? 1.05 : 1.3;
       const roll = Math.random();
       if (roll < 0.42) {
-        // Spiral burst.
+        // Spiral burst, ringed by the eclipse: a shockwave ring blooms from
+        // the moon so the attack reads as one signature gesture.
         const arms = 3 + this.phase;
         for (let i = 0; i < arms; i++) {
           const a = this.spiralAngle + (i / arms) * Math.PI * 2;
           game.spawnEnemyBullet(this.x, this.y, Math.cos(a), Math.sin(a), 150);
         }
+        if (game.particles) game.particles.ring(this.x, this.y, '#c084fc', 190, 0.8, 5);
         this.spiralAngle += 0.55;
         this.attackTimer = speed * 0.55;
       } else if (roll < 0.75) {
@@ -513,6 +520,36 @@ export class Boss {
     ctx.arc(0, 0, this.radius + 16, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
+    // The eclipse ring: a wide counter-rotating band that burns hotter as
+    // the moon's phases deepen — the boss's signature, visible at a glance.
+    const eclipseColor = this.phase === 3 ? 'rgba(244, 114, 182, 0.75)'
+      : this.phase === 2 ? 'rgba(232, 121, 249, 0.65)' : 'rgba(192, 132, 252, 0.5)';
+    ctx.strokeStyle = eclipseColor;
+    ctx.lineWidth = 5;
+    ctx.setLineDash([34, 22]);
+    ctx.lineDashOffset = t * (26 + this.phase * 10);
+    ctx.beginPath();
+    ctx.arc(0, 0, this.radius + 32, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // Orbiting moon shards: crescent fragments circling the Hollow Moon.
+    for (let i = 0; i < 5; i++) {
+      const a = t * 0.7 + (i / 5) * Math.PI * 2;
+      const ox = Math.cos(a) * (this.radius + 34);
+      const oy = Math.sin(a) * (this.radius + 34) * 0.62;
+      ctx.save();
+      ctx.translate(ox, oy);
+      ctx.rotate(a + Math.PI / 2);
+      ctx.fillStyle = '#e8ecf7';
+      ctx.beginPath();
+      ctx.arc(0, 0, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#2b3a93';
+      ctx.beginPath();
+      ctx.arc(4, -2, 7.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
     // The moon body.
     const grad = ctx.createRadialGradient(-30, -34, 10, 0, 0, this.radius);
     grad.addColorStop(0, '#ffffff');

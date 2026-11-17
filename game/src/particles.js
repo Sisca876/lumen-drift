@@ -59,7 +59,20 @@ export class Particles {
   }
 
   text(x, y, str, color = '#fef3c7', size = 18) {
-    this.texts.push({ x: x + rand(-8, 8), y, str, color, size, life: 0.9, maxLife: 0.9 });
+    // Keep floating text out from under the HUD panels: clamp into the open
+    // arena, so a "LANTERN LIT" at the arena's edge never hides behind the
+    // CHART circle or the side panels.
+    const cx = Math.max(200, Math.min(1080, x));
+    const cy = Math.max(150, Math.min(624, y));
+    // Stack texts that would pile onto one anchor (the spire under attack):
+    // each live neighbour pushes the new text one slot higher, so every
+    // line stays readable instead of printing over the last one.
+    let slot = 0;
+    for (const t of this.texts) {
+      if (Math.abs(t.x - cx) < 80 && Math.abs(t.y - cy) < 26) slot++;
+    }
+    slot = Math.min(slot, 3);
+    this.texts.push({ x: cx + rand(-8, 8), y: cy - slot * 22, str, color, size, life: 0.9, maxLife: 0.9 });
   }
 
   update(dt) {
